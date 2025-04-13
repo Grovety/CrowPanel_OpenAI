@@ -1,0 +1,19 @@
+## IDF Component Manager Manifest File
+dependencies:
+  idf:
+    version: ">=5.0"
+  lvgl/lvgl: "^8"
+  espressif/esp32_display_panel: "^1.0.0"
+  espressif/esp32_io_expander: "^1.1.0"
+  espressif/esp-lib-utils: "^0.2.0"
+  espressif/esp-sr: "1.9.5"
+  espressif/esp-dsp: "~1.4.0"
+  espressif/i2c_bus: ^1.4.0
+  capture_audio_src:
+    path: ../components/esp_capture/src/impl/capture_audio_src
+  capture_audio_enc:
+    path: ../components/esp_capture/src/impl/capture_audio_enc
+  peer_default:
+    path: ../components/esp_webrtc/impl/peer_default
+  render_impl:
+    path: ../components/av_render/render_impl
