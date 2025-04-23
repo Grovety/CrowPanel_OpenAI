@@ -39,7 +39,7 @@ void msg_box_create(const char *message) {
     lv_obj_center(mbox);
     lv_obj_set_width(mbox, lv_pct(60));
     lv_obj_t *msg = lv_msgbox_get_text(mbox);
-    lv_obj_add_style(msg, &m_font_style, 0);
+    lv_obj_set_style_text_font(msg, &M_FONT, 0);
     lv_obj_set_style_text_align(msg, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_t *buttons = lv_msgbox_get_btns(mbox);
     lv_btnmatrix_set_btn_width(buttons, 0, 2);

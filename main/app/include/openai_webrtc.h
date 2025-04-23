@@ -62,6 +62,10 @@ void query_webrtc(void);
  */
 int stop_webrtc(void);
 
+int start_capture(void);
+int stop_capture(void);
+int commit_audio(void);
+
 #ifdef __cplusplus
 }
 #endif

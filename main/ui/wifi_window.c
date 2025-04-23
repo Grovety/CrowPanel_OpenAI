@@ -71,14 +71,14 @@ wifi_window_t *wifi_window_create(lv_obj_t *cont, lv_obj_t *keyboard) {
     lv_obj_set_flex_flow(win->ssid.cont, LV_FLEX_FLOW_ROW);
     win->ssid.label = lv_label_create(win->ssid.cont);
     lv_label_set_text(win->ssid.label, "SSID");
-    lv_obj_add_style(win->ssid.label, &m_font_style, 0);
+    lv_obj_set_style_text_font(win->ssid.label, &M_FONT, 0);
     lv_obj_set_flex_grow(win->ssid.label, 1);
     win->ssid.field = lv_dropdown_create(win->ssid.cont);
     lv_dropdown_clear_options(win->ssid.field);
     lv_obj_add_event_cb(win->ssid.field, dropdown_event_handler, LV_EVENT_ALL,
                         NULL);
     lv_obj_set_flex_grow(win->ssid.field, 2);
-    lv_obj_add_style(win->ssid.field, &m_font_style, 0);
+    lv_obj_set_style_text_font(win->ssid.field, &M_FONT, 0);
 
     win->password.cont = lv_obj_create(cont);
     lv_obj_set_style_pad_all(win->password.cont, 10, LV_STATE_DEFAULT);
@@ -89,7 +89,7 @@ wifi_window_t *wifi_window_create(lv_obj_t *cont, lv_obj_t *keyboard) {
     lv_obj_set_flex_flow(win->password.cont, LV_FLEX_FLOW_ROW);
     win->password.label = lv_label_create(win->password.cont);
     lv_label_set_text(win->password.label, "Password");
-    lv_obj_add_style(win->password.label, &m_font_style, 0);
+    lv_obj_set_style_text_font(win->password.label, &M_FONT, 0);
     lv_obj_set_flex_grow(win->password.label, 1);
     win->password.field = lv_textarea_create(win->password.cont);
     lv_textarea_set_one_line(win->password.field, 1);
@@ -97,7 +97,7 @@ wifi_window_t *wifi_window_create(lv_obj_t *cont, lv_obj_t *keyboard) {
                         keyboard);
     lv_textarea_set_placeholder_text(win->password.field, "Enter Password");
     lv_obj_set_flex_grow(win->password.field, 2);
-    lv_obj_add_style(win->password.field, &m_font_style, 0);
+    lv_obj_set_style_text_font(win->password.field, &M_FONT, 0);
 
     lv_style_init(&connect_btn_style);
     lv_style_set_bg_color(&connect_btn_style, lv_palette_main(LV_PALETTE_BLUE));

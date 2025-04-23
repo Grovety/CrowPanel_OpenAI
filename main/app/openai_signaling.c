@@ -17,12 +17,6 @@
 
 #define TAG "OPENAI_SIGNALING"
 
-// Prefer to use mini model currently
-#define OPENAI_REALTIME_MODEL "gpt-4o-mini-transcribe"
-#define OPENAI_URL_ROOT       "https://api.openai.com"
-#define OPENAI_REALTIME_URL   OPENAI_URL_ROOT "/v1/realtime"
-#define OPENAI_TOKEN_ENDPOINT "/transcription_sessions"
-
 #define SAFE_FREE(p)                                                           \
     if (p) {                                                                   \
         free(p);                                                               \
@@ -68,13 +62,11 @@ static void session_answer(http_resp_t *resp, void *ctx) {
 }
 
 static void get_ephemeral_token(openai_signaling_t *sig, char *token) {
-    const char *session_url = OPENAI_REALTIME_URL OPENAI_TOKEN_ENDPOINT;
-    char content_type[32] = "Content-Type: application/json";
-    int len = strlen("Authorization: Bearer ") + strlen(token) + 1;
+    int len = strlen(OPENAI_AUTH_PREFIX) + strlen(token) + 1;
     char auth[len];
-    snprintf(auth, len, "Authorization: Bearer %s", token);
+    snprintf(auth, len, OPENAI_AUTH_PREFIX "%s", token);
     char *header[] = {
-        content_type,
+        "Content-Type: application/json",
         auth,
         NULL,
     };
@@ -83,16 +75,14 @@ static void get_ephemeral_token(openai_signaling_t *sig, char *token) {
     cJSON_AddStringToObject(input_audio_transcription, "model",
                             OPENAI_REALTIME_MODEL);
     cJSON_AddStringToObject(input_audio_transcription, "language", "en");
-    cJSON *input_audio_noise_reduction = cJSON_CreateObject();
-    cJSON_AddStringToObject(input_audio_noise_reduction, "type", "near_field");
     cJSON_AddItemToObject(root, "input_audio_transcription",
                           input_audio_transcription);
-    cJSON_AddItemToObject(root, "input_audio_noise_reduction",
-                          input_audio_noise_reduction);
     char *json_string = cJSON_Print(root);
     if (json_string) {
-        ESP_LOGD(TAG, "post to url=%s:\n%s", session_url, json_string);
-        https_post(session_url, header, json_string, NULL, session_answer, sig);
+        ESP_LOGD(TAG, "post to url=%s:\n%s", OPENAI_REALTIME_SESSION_URL,
+                 json_string);
+        https_post(OPENAI_REALTIME_SESSION_URL, header, json_string, NULL,
+                   session_answer, sig);
         free(json_string);
     }
     cJSON_Delete(root);

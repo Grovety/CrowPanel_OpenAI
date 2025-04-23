@@ -4,6 +4,7 @@
 #include "font/lv_symbol_def.h"
 
 #include "esp_log.h"
+#include "misc/lv_color.h"
 
 status_bar_t *status_bar_create(lv_obj_t *cont) {
     status_bar_t *sb = (status_bar_t *)malloc(sizeof(status_bar_t));
@@ -12,7 +13,11 @@ status_bar_t *status_bar_create(lv_obj_t *cont) {
     lv_obj_set_size(sb->bar, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_clear_flag(sb->bar, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_set_style_pad_all(sb->bar, 2, LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(sb->bar, 2, LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(sb->bar, 2, LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(sb->bar, 5, LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(sb->bar, 5, LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_row(sb->bar, 5, LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(sb->bar, 0, LV_STATE_DEFAULT);
 
     lv_obj_set_layout(sb->bar, LV_LAYOUT_FLEX);
@@ -20,7 +25,7 @@ status_bar_t *status_bar_create(lv_obj_t *cont) {
     lv_obj_set_flex_align(sb->bar, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
 
-    lv_obj_add_style(sb->bar, &m_font_style, 0);
+    lv_obj_set_style_text_font(sb->bar, &M_FONT, 0);
 
     sb->webrtc = lv_label_create(sb->bar);
     lv_label_set_text(sb->webrtc, "");
@@ -29,8 +34,8 @@ status_bar_t *status_bar_create(lv_obj_t *cont) {
 
     sb->separator = lv_obj_create(cont);
     lv_obj_set_size(sb->separator, LV_PCT(100), 3);
-    lv_obj_set_style_bg_color(sb->separator, lv_color_hex(0x007BFF),
-                              0); // Blue color
+    lv_obj_set_style_bg_color(sb->separator, lv_palette_main(LV_PALETTE_BLUE),
+                              0);
     lv_obj_set_style_radius(sb->separator, 0, 0);
     lv_obj_set_style_border_width(sb->separator, 0, LV_STATE_DEFAULT);
     lv_obj_set_style_pad_all(sb->separator, 0, LV_STATE_DEFAULT);

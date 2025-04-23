@@ -8,16 +8,6 @@
 
 static const char *TAG = "ui";
 
-static void api_disconnect_btn_event_cb(lv_event_t *e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    terminal_t *term = (terminal_t *)lv_event_get_user_data(e);
-    if (code == LV_EVENT_CLICKED) {
-        terminal_output_clear(term);
-        AppEvent_t ev = {.id = WEBRTC_STOP, .data = NULL};
-        xQueueSend(app_events_queue, &ev, 0);
-    }
-}
-
 config_screen_t *config_screen_create(lv_obj_t *cont, lv_obj_t *keyboard) {
     config_screen_t *src = (config_screen_t *)malloc(sizeof(config_screen_t));
 
@@ -80,8 +70,7 @@ main_cont_t *ui_create() {
     main_cont->config_screen =
         config_screen_create(main_cont->content, main_cont->keyboard);
 
-    main_cont->terminal =
-        terminal_create(main_cont->content, api_disconnect_btn_event_cb);
+    main_cont->terminal = terminal_create(main_cont->content);
     switch_screen(main_cont, CONFIG_SCREEN);
     return main_cont;
 }

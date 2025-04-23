@@ -13,9 +13,12 @@
 #include "esp_webrtc.h"
 #include "media_lib_os.h"
 #include "media_sys.h"
+#include "openai.h"
 #include "openai_webrtc.h"
 
+#include "esp_http_client.h"
 #include "esp_log.h"
+#include "https_client.h"
 
 #include "esp_peer_default.h"
 #include "esp_webrtc_defaults.h"
@@ -23,6 +26,38 @@
 #define TAG "OPENAI_WEBRTC"
 
 static esp_webrtc_handle_t webrtc = NULL;
+static esp_webrtc_media_provider_t media_provider = {};
+
+static int send_json(cJSON *json) {
+    char *json_string = cJSON_Print(json);
+    if (json_string) {
+        ESP_LOGD(TAG, "send via data channel:\n%s", json_string);
+        esp_webrtc_send_custom_data(
+            webrtc, ESP_WEBRTC_CUSTOM_DATA_VIA_DATA_CHANNEL,
+            (uint8_t *)json_string, strlen(json_string));
+        free(json_string);
+        return 0;
+    }
+    return -1;
+}
+
+static int update_session(openai_ctx_t *openai_ctx) {
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "transcription_session.update");
+    cJSON *session = cJSON_CreateObject();
+    cJSON_AddNullToObject(session, "turn_detection");
+
+    cJSON *input_audio_noise_reduction = cJSON_CreateObject();
+    cJSON_AddStringToObject(input_audio_noise_reduction, "type", "near_field");
+    cJSON_AddItemToObject(session, "input_audio_noise_reduction",
+                          input_audio_noise_reduction);
+
+    cJSON_AddItemToObject(root, "session", session);
+
+    send_json(root);
+    cJSON_Delete(root);
+    return 0;
+}
 
 static int webrtc_data_handler(esp_webrtc_custom_data_via_t via, uint8_t *data,
                                int size, void *ctx) {
@@ -61,9 +96,17 @@ static int webrtc_data_handler(esp_webrtc_custom_data_via_t via, uint8_t *data,
                 xQueueSend(openai_ctx->openai_event_queue, &ev, 0);
                 openai_send_text(openai_ctx, transcript->valuestring);
             }
+        } else if (strcmp(type->valuestring, "input_audio_buffer.committed") ==
+                   0) {
+            openai_event_t ev = {
+                .type = OPENAI_EVENT_AUDIO_COMMITTED,
+                .user_data = NULL,
+            };
+            xQueueSend(openai_ctx->openai_event_queue, &ev, 0);
         } else if (strcmp(type->valuestring, "transcription_session.created") ==
                    0) {
-            // here webrtc session can be updated
+            stop_capture();
+            update_session(openai_ctx);
         }
     } while (false);
     cJSON_Delete(root);
@@ -83,10 +126,10 @@ int start_webrtc(openai_ctx_t *openai_ctx) {
         webrtc = NULL;
     }
     esp_peer_default_cfg_t peer_cfg = {
-        .agent_recv_timeout = 500,
+        .agent_recv_timeout = 5000,
     };
     openai_signaling_cfg_t openai_cfg = {
-        .token = openai_ctx->api_key,
+        .token = openai_ctx->session.api_key,
     };
     esp_webrtc_cfg_t cfg = {
         .peer_cfg =
@@ -114,7 +157,6 @@ int start_webrtc(openai_ctx_t *openai_ctx) {
         return ret;
     }
     // Set media provider
-    esp_webrtc_media_provider_t media_provider = {};
     media_sys_get_provider(&media_provider);
     esp_webrtc_set_media_provider(webrtc, &media_provider);
 
@@ -141,5 +183,23 @@ int stop_webrtc(void) {
         webrtc = NULL;
         esp_webrtc_close(handle);
     }
+    return 0;
+}
+
+int start_capture(void) {
+    esp_capture_start(media_provider.capture);
+    return 0;
+}
+
+int stop_capture(void) {
+    esp_capture_stop(media_provider.capture);
+    return 0;
+}
+
+int commit_audio(void) {
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "input_audio_buffer.commit");
+    send_json(root);
+    cJSON_Delete(root);
     return 0;
 }

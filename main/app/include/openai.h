@@ -18,18 +18,39 @@
 
 #include <cJSON.h>
 
+#define OPENAI_URL_ROOT       "https://api.openai.com"
+#define OPENAI_CHAT_MODEL     "gpt-4.1-mini"
+#define OPENAI_REALTIME_MODEL "gpt-4o-mini-transcribe"
+#define OPENAI_REALTIME_URL   OPENAI_URL_ROOT "/v1/realtime"
+#define OPENAI_REALTIME_SESSION_URL                                            \
+    OPENAI_REALTIME_URL "/transcription_sessions"
+#define OPENAI_API_URL     OPENAI_URL_ROOT "/v1/responses"
+#define OPENAI_AUTH_PREFIX "Authorization: Bearer "
+
 typedef enum {
     OPENAI_EVENT_NONE = 0, /*!< None event */
     OPENAI_EVENT_TRANSCRIPTION_DONE = 1,
-    OPENAI_EVENT_REQUEST_SENT = 2,
-    OPENAI_EVENT_REQUEST_TIMEOUT = 3,
-    OPENAI_EVENT_RESPONSE_DONE = 4,
+    OPENAI_EVENT_AUDIO_COMMITTED = 2,
+    OPENAI_EVENT_REQUEST_SENT = 3,
+    OPENAI_EVENT_REQUEST_TIMEOUT = 4,
+    OPENAI_EVENT_RESPONSE_DONE = 5,
 } openai_event_type_t;
 
 typedef struct {
     openai_event_type_t type; /*!< Event type */
     void *user_data;          /*!< User data (maybe NULL) */
 } openai_event_t;
+
+typedef struct {
+    /**
+     * @brief  Token for OpenAI API
+     */
+    char api_key[256];
+    /**
+     * @brief  Buffer for last response id to keep conversation context
+     */
+    char previous_response_id[64];
+} openai_session_ctx_t;
 
 typedef struct {
     /**
@@ -49,13 +70,9 @@ typedef struct {
      */
     MessageBufferHandle_t transcripts_buffer;
     /**
-     * @brief  Token for OpenAI API
+     * @brief  Current session ctx
      */
-    char api_key[256];
-    /**
-     * @brief  Buffer for last response id to keep conversation context
-     */
-    char previous_response_id[64];
+    openai_session_ctx_t session;
 } openai_ctx_t;
 
 #ifdef __cplusplus
@@ -72,7 +89,16 @@ extern "C" {
  *      - Others  Fail to init
  */
 int openai_init(openai_ctx_t **ctx);
-
+/**
+ * @brief  Reset OpenAI context
+ *
+ * @param[out]  ctx Storage for OpenAI context pointer
+ *
+ * @return
+ *      - 0       On success
+ *      - Others  Fail to init
+ */
+int openai_reset(openai_ctx_t *ctx);
 /**
  * @brief  Send text to OpenAI server
  *

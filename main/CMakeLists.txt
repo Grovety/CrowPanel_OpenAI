@@ -19,7 +19,7 @@ set(APP_INC "${APP_DIR}/include" "${APP_DIR}/audio/include")
 set(UI_DIR "${PROJECT_DIR}/main/ui")
 set(UI_SRC 
     "${UI_DIR}/assets/icons.c"
-    "${UI_DIR}/assets/noto_sans_18.c"
+    "${UI_DIR}/assets/noto_sans_20.c"
     "${UI_DIR}/auth_window.c"
     "${UI_DIR}/common.c"
     "${UI_DIR}/popup.c"

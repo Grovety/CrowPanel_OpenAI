@@ -10,13 +10,11 @@ int openai_init(openai_ctx_t **ctx) {
     if (!ctx) {
         return -1;
     }
-    openai_ctx_t *openai_ctx = (openai_ctx_t *)malloc(sizeof(openai_ctx_t));
-    memset(openai_ctx, 0, sizeof(openai_ctx));
+    openai_ctx_t *openai_ctx = (openai_ctx_t *)calloc(1, sizeof(openai_ctx_t));
     if (!openai_ctx) {
         ESP_LOGE(TAG, "Unable to allocate openai ctx");
         return -1;
     }
-
     openai_ctx->webrtc_event_queue =
         xQueueCreate(5, sizeof(esp_webrtc_event_t));
     if (!openai_ctx->webrtc_event_queue) {
@@ -38,7 +36,7 @@ int openai_init(openai_ctx_t **ctx) {
         free(openai_ctx);
         return -1;
     }
-    openai_ctx->transcripts_buffer = xMessageBufferCreate(64);
+    openai_ctx->transcripts_buffer = xMessageBufferCreate(256);
     if (!openai_ctx->transcripts_buffer) {
         ESP_LOGE(TAG, "Fail to create transcripts buffer");
         vQueueDelete(openai_ctx->webrtc_event_queue);
@@ -46,8 +44,13 @@ int openai_init(openai_ctx_t **ctx) {
         free(openai_ctx);
         return -1;
     }
-    memset(openai_ctx->previous_response_id, 0,
-           sizeof(openai_ctx->previous_response_id));
     *ctx = openai_ctx;
+    return 0;
+}
+
+int openai_reset(openai_ctx_t *ctx) {
+    xMessageBufferReset(ctx->messages_buffer);
+    xMessageBufferReset(ctx->transcripts_buffer);
+    memset(&ctx->session, 0, sizeof(ctx->session));
     return 0;
 }

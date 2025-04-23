@@ -13,19 +13,24 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/queue.h"
+#include "freertos/timers.h"
 
 #define STATUS_WIFI_CONNECTED_MSK   BIT0
 #define STATUS_WEBRTC_CONNECTED_MSK BIT1
+#define STATUS_OPENAI_BUSY_MSK      BIT2
+#define STATUS_MIC_ON_MSK           BIT3
 
 typedef enum {
     WIFI_START_SCAN = 0,
     WIFI_CONNECT,
     WIFI_DISCONNECT,
-    WEBRTC_START,
-    WEBRTC_STOP,
+    CHAT_SESSION_START,
+    CHAT_SESSION_STOP,
     STORAGE_STORE_WIFI_SETTINGS,
     STORAGE_STORE_API_KEY,
     STORAGE_CLEAR,
+    MIC_ON,
+    MIC_OFF,
 } eAppEventId;
 
 typedef struct {

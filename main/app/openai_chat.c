@@ -1,31 +1,18 @@
-#include "https_client.h"
 #include "openai.h"
 
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "https_client.h"
 
 #define TAG "OPENAI_CHAT"
 
-#define AUTH_PREFIX  "Authorization: Bearer "
-#define OPENAI_URL   "https://api.openai.com/v1/responses"
-#define OPENAI_MODEL "gpt-4o-mini"
-
-#define HTTPS_POST_WITH_RETRY(func, result, ...)                               \
-    do {                                                                       \
-        size_t attempt = 0;                                                    \
-        do {                                                                   \
-            result = func(__VA_ARGS__);                                        \
-        } while (result == ESP_ERR_HTTP_EAGAIN && attempt++ < 5);              \
-    } while (0)
-
 static void process_response(http_resp_t *resp, void *ctx);
-static void process_output_item(openai_ctx_t *openai_ctx, cJSON *output_item);
 
 typedef void (*sentence_callback_t)(const char *sentence_start,
                                     size_t sentence_length, void *user_data);
 
 static int is_sentence_end(char c) {
-    return (c == '.' || c == '!' || c == '?');
+    return (c == '.' || c == '!' || c == '?' || c == '\n');
 }
 
 static const char *skip_leading_whitespace(const char *str) {
@@ -160,77 +147,76 @@ static void process_response(http_resp_t *resp, void *ctx) {
 
         cJSON *id = cJSON_GetObjectItemCaseSensitive(root, "id");
         if (id && cJSON_IsString(id)) {
-            strncpy(openai_ctx->previous_response_id, id->valuestring,
-                    sizeof(openai_ctx->previous_response_id));
+            strncpy(openai_ctx->session.previous_response_id, id->valuestring,
+                    sizeof(openai_ctx->session.previous_response_id));
         }
 
         cJSON *output = cJSON_GetObjectItemCaseSensitive(root, "output");
-        cJSON *item;
-        cJSON_ArrayForEach(item, output) {
-            process_output_item(openai_ctx, item);
+        cJSON *output_item;
+        cJSON_ArrayForEach(output_item, output) {
+            cJSON *type = cJSON_GetObjectItemCaseSensitive(output_item, "type");
+            if (cJSON_IsString(type) &&
+                strcmp(type->valuestring, "message") == 0) {
+                cJSON *content =
+                    cJSON_GetObjectItemCaseSensitive(output_item, "content");
+                cJSON *status =
+                    cJSON_GetObjectItemCaseSensitive(content, "status");
+                if (cJSON_IsString(status) &&
+                    strcmp(status->valuestring, "completed") != 0) {
+                    ESP_LOGE(TAG, "output status: %s", status->valuestring);
+                    return;
+                }
+                cJSON *content_item;
+                cJSON_ArrayForEach(content_item, content) {
+                    cJSON *text =
+                        cJSON_GetObjectItemCaseSensitive(content_item, "text");
+                    if (text && cJSON_IsString(text)) {
+                        ESP_LOGI(TAG, "Extracted Message:\n%s",
+                                 text->valuestring);
+                        split_by_senteces(text->valuestring,
+                                          send_sentence_callback, openai_ctx);
+                        xMessageBufferSend(openai_ctx->messages_buffer, "\n", 1,
+                                           0);
+                    }
+                }
+            } else {
+                ESP_LOGW(TAG, "Unknown output type %s", type->valuestring);
+            }
         }
     } while (false);
     cJSON_Delete(root);
 }
 
-static void process_output_item(openai_ctx_t *openai_ctx, cJSON *output_item) {
-    cJSON *type = cJSON_GetObjectItemCaseSensitive(output_item, "type");
-    if (cJSON_IsString(type) && strcmp(type->valuestring, "message") == 0) {
-        cJSON *content =
-            cJSON_GetObjectItemCaseSensitive(output_item, "content");
-        cJSON *status = cJSON_GetObjectItemCaseSensitive(content, "status");
-        if (cJSON_IsString(status) &&
-            strcmp(status->valuestring, "completed") != 0) {
-            ESP_LOGE(TAG, "output status: %s", status->valuestring);
-            return;
-        }
-        cJSON *content_item;
-        cJSON_ArrayForEach(content_item, content) {
-            cJSON *text =
-                cJSON_GetObjectItemCaseSensitive(content_item, "text");
-            if (text && cJSON_IsString(text)) {
-                ESP_LOGI(TAG, "Extracted Message:\n%s", text->valuestring);
-                split_by_senteces(text->valuestring, send_sentence_callback,
-                                  openai_ctx);
-                xMessageBufferSend(openai_ctx->messages_buffer, "\n", 1, 0);
-            }
-        }
-    } else if (cJSON_IsString(type) &&
-               strcmp(type->valuestring, "function_call") == 0) {
-        // add function call processing
-    } else {
-        ESP_LOGW(TAG, "Unknown output type %s", type->valuestring);
-    }
-}
-
 int openai_send_text(openai_ctx_t *openai_ctx, char *text) {
-    const int len = strlen(AUTH_PREFIX) + strlen(openai_ctx->api_key) + 1;
-    char auth_string[len];
-    snprintf(auth_string, sizeof(auth_string), AUTH_PREFIX "%s",
-             openai_ctx->api_key);
+    const int len =
+        sizeof(OPENAI_AUTH_PREFIX) + strlen(openai_ctx->session.api_key) + 1;
+    char auth[len];
+    snprintf(auth, len, OPENAI_AUTH_PREFIX "%s", openai_ctx->session.api_key);
     char *header[] = {
         "Content-Type: application/json",
-        auth_string,
+        auth,
         NULL,
     };
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "model", OPENAI_MODEL);
+    cJSON_AddStringToObject(root, "model", OPENAI_CHAT_MODEL);
     cJSON_AddStringToObject(root, "input", text);
-    if (strlen(openai_ctx->previous_response_id)) {
+    if (strlen(openai_ctx->session.previous_response_id)) {
         cJSON_AddStringToObject(root, "previous_response_id",
-                                openai_ctx->previous_response_id);
+                                openai_ctx->session.previous_response_id);
     }
+    cJSON_AddStringToObject(
+        root, "instructions",
+        "Be precise, try to fit the response in three paragraphs");
     char *json_string = cJSON_Print(root);
     if (json_string) {
-        ESP_LOGD(TAG, "post to url=%s:\n%s", OPENAI_URL, json_string);
+        ESP_LOGD(TAG, "post to url=%s:\n%s", OPENAI_API_URL, json_string);
         openai_event_t ev = {
             .type = OPENAI_EVENT_REQUEST_SENT,
             .user_data = NULL,
         };
         xQueueSend(openai_ctx->openai_event_queue, &ev, 0);
-        int result;
-        HTTPS_POST_WITH_RETRY(https_post, result, OPENAI_URL, header,
-                              json_string, NULL, process_response, openai_ctx);
+        int result = https_post(OPENAI_API_URL, header, json_string, NULL,
+                                process_response, openai_ctx);
         if (result == ESP_ERR_HTTP_EAGAIN) {
             openai_event_t ev = {
                 .type = OPENAI_EVENT_REQUEST_TIMEOUT,

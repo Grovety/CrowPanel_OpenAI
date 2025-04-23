@@ -118,6 +118,7 @@ int https_send_request(const char *method, char **headers, const char *url, char
         .user_data = &info,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
+    esp_http_client_set_timeout_ms(client, 20000);
     if (client == NULL) {
         ESP_LOGE(TAG, "Fail to init client");
         return -1;

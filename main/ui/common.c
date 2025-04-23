@@ -1,18 +1,8 @@
 #include "common.h"
 
-LV_FONT_DECLARE(noto_sans_18)
-
-lv_style_t m_font_style;
-lv_style_t s_font_style;
 lv_style_t transparent_area_style;
 
 void ui_styles_init() {
-    lv_style_init(&m_font_style);
-    lv_style_set_text_font(&m_font_style, &lv_font_montserrat_26);
-
-    lv_style_init(&s_font_style);
-    lv_style_set_text_font(&s_font_style, &noto_sans_18);
-
     lv_style_init(&transparent_area_style);
     lv_style_set_border_opa(&transparent_area_style, 0);
     lv_style_set_bg_opa(&transparent_area_style, 0);

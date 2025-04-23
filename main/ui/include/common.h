@@ -23,8 +23,11 @@ typedef struct {
     lv_obj_t *btn;
 } button_t;
 
-extern lv_style_t m_font_style;
-extern lv_style_t s_font_style;
+LV_FONT_DECLARE(noto_sans_20);
+
+#define S_FONT noto_sans_20
+#define M_FONT lv_font_montserrat_26
+
 extern lv_style_t transparent_area_style;
 
 /**

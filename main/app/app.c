@@ -33,17 +33,30 @@ extern bool lvgl_port_unlock(void);
 #define WIFI_PSW_KEY           "psw"
 #define API_KEY_KEY            "api_key"
 
+#define TRANSCRIPTION_TIMER_TIMEOUT 10000
+
 static const char *TAG = "app";
 
 EventGroupHandle_t app_status_bits = NULL;
 QueueHandle_t app_events_queue = NULL;
 
+static TimerHandle_t transcription_response_timer = NULL;
 
 struct {
     selected_network_info_t network_info;
     openai_ctx_t *openai_ctx;
     main_cont_t *main_cont;
 } static s_app_ctx;
+
+static void vTimerCallback(TimerHandle_t xTimer) {
+    ESP_LOGW(TAG, "%s timed out", pcTimerGetName(xTimer));
+    openai_ctx_t *openai_ctx = (openai_ctx_t *)pvTimerGetTimerID(xTimer);
+    openai_event_t ev = {
+        .type = OPENAI_EVENT_REQUEST_TIMEOUT,
+        .user_data = NULL,
+    };
+    xQueueSend(openai_ctx->openai_event_queue, &ev, 0);
+}
 
 static void app_events_task(void *pv) {
     for (;;) {
@@ -52,8 +65,8 @@ static void app_events_task(void *pv) {
         switch (ev.id) {
         case WIFI_START_SCAN:
             ESP_LOGI(TAG, "WIFI_START_SCAN");
-            LVGL_MUTEX_LOCKED_CALL(
-                processing_popup_show(s_app_ctx.main_cont->processing_popup, 1));
+            LVGL_MUTEX_LOCKED_CALL(processing_popup_show(
+                s_app_ctx.main_cont->processing_popup, 1));
             wifi_start_scan();
             break;
         case WIFI_CONNECT: {
@@ -72,8 +85,8 @@ static void app_events_task(void *pv) {
                     ESP_LOGW(TAG, "Provide password");
                     LVGL_MUTEX_LOCKED_CALL(msg_box_create("Provide password"));
                 } else {
-                    LVGL_MUTEX_LOCKED_CALL(
-                        processing_popup_show(s_app_ctx.main_cont->processing_popup, 1));
+                    LVGL_MUTEX_LOCKED_CALL(processing_popup_show(
+                        s_app_ctx.main_cont->processing_popup, 1));
                     wifi_connect(s_app_ctx.network_info.ssid,
                                  s_app_ctx.network_info.password);
                 }
@@ -85,28 +98,26 @@ static void app_events_task(void *pv) {
         case WIFI_DISCONNECT:
             wifi_disconnect();
             break;
-        case WEBRTC_START: {
-            ESP_LOGI(TAG, "WEBRTC_START");
+        case CHAT_SESSION_START: {
+            ESP_LOGI(TAG, "CHAT_SESSION_START");
             char *api_key = (char *)ev.data;
             if (api_key) {
                 ESP_LOGD(TAG, "API key: %s", api_key);
-                strcpy(s_app_ctx.openai_ctx->api_key, api_key);
                 if (!(xEventGroupGetBits(app_status_bits) &
                       STATUS_WIFI_CONNECTED_MSK)) {
                     LVGL_MUTEX_LOCKED_CALL(
                         msg_box_create("Not connected to wifi"));
                 } else {
-                    xMessageBufferReset(s_app_ctx.openai_ctx->messages_buffer);
-                    xMessageBufferReset(s_app_ctx.openai_ctx->transcripts_buffer);
-                    memset(s_app_ctx.openai_ctx->previous_response_id, 0,
-                           sizeof(s_app_ctx.openai_ctx->previous_response_id));
-                    LVGL_MUTEX_LOCKED_CALL(
-                        processing_popup_show(s_app_ctx.main_cont->processing_popup, 1));
+                    openai_reset(s_app_ctx.openai_ctx);
+                    strcpy(s_app_ctx.openai_ctx->session.api_key, api_key);
+                    LVGL_MUTEX_LOCKED_CALL(processing_popup_show(
+                        s_app_ctx.main_cont->processing_popup, 1));
                     int ret = start_webrtc(s_app_ctx.openai_ctx);
                     if (ret != 0) {
                         ESP_LOGE(TAG, "ret=%d", ret);
                         lvgl_port_lock(-1);
-                        processing_popup_show(s_app_ctx.main_cont->processing_popup, 0);
+                        processing_popup_show(
+                            s_app_ctx.main_cont->processing_popup, 0);
                         msg_box_create("Failed to start webrtc");
                         lvgl_port_unlock();
                     }
@@ -116,9 +127,14 @@ static void app_events_task(void *pv) {
                 LVGL_MUTEX_LOCKED_CALL(msg_box_create("Provide API key"));
             }
         } break;
-        case WEBRTC_STOP:
-            ESP_LOGI(TAG, "WEBRTC_STOP");
-            stop_webrtc();
+        case CHAT_SESSION_STOP:
+            ESP_LOGI(TAG, "CHAT_SESSION_STOP");
+            EventBits_t xBits =
+                xEventGroupWaitBits(app_status_bits, STATUS_OPENAI_BUSY_MSK,
+                                    pdFALSE, pdFALSE, pdMS_TO_TICKS(100));
+            if (!(xBits & STATUS_OPENAI_BUSY_MSK)) {
+                stop_webrtc();
+            }
             break;
         case STORAGE_STORE_WIFI_SETTINGS:
             ESP_LOGI(TAG, "STORAGE_STORE_WIFI_SETTINGS");
@@ -130,11 +146,29 @@ static void app_events_task(void *pv) {
         case STORAGE_STORE_API_KEY:
             ESP_LOGI(TAG, "STORAGE_STORE_API_KEY");
             nvs_store_str(APP_SETTINGS_PART_NAME, API_KEY_KEY,
-                          s_app_ctx.openai_ctx->api_key);
+                          s_app_ctx.openai_ctx->session.api_key);
             break;
         case STORAGE_CLEAR:
             ESP_LOGI(TAG, "STORAGE_CLEAR");
             nvs_erase_data(APP_SETTINGS_PART_NAME);
+            break;
+        case MIC_ON:
+            ESP_LOGI(TAG, "MIC_ON");
+            if (!(xEventGroupGetBits(app_status_bits) & STATUS_MIC_ON_MSK)) {
+                xEventGroupSetBits(app_status_bits, STATUS_MIC_ON_MSK);
+                start_capture();
+            }
+            break;
+        case MIC_OFF:
+            ESP_LOGI(TAG, "MIC_OFF");
+            if ((xEventGroupGetBits(app_status_bits) & STATUS_MIC_ON_MSK)) {
+                commit_audio();
+                xTimerChangePeriod(transcription_response_timer,
+                                   pdMS_TO_TICKS(TRANSCRIPTION_TIMER_TIMEOUT),
+                                   0);
+                stop_capture();
+                xEventGroupClearBits(app_status_bits, STATUS_MIC_ON_MSK);
+            }
             break;
         default:
             break;
@@ -154,7 +188,8 @@ static void wifi_status_monitor(void *pv) {
             int n = get_available_networks(&ssids);
             lvgl_port_lock(-1);
             if (n > 0) {
-                add_wifi_options(s_app_ctx.main_cont->config_screen->wifi_win, ssids, n);
+                add_wifi_options(s_app_ctx.main_cont->config_screen->wifi_win,
+                                 ssids, n);
                 free(ssids);
             }
             processing_popup_show(s_app_ctx.main_cont->processing_popup, 0);
@@ -181,7 +216,7 @@ static void wifi_status_monitor(void *pv) {
                         app_status_bits, STATUS_WIFI_CONNECTED_MSK);
                     if (xBits & STATUS_WEBRTC_CONNECTED_MSK) {
                         ESP_LOGW(TAG, "webrtc is started, try to stop");
-                        AppEvent_t ev = {.id = WEBRTC_STOP, .data = NULL};
+                        AppEvent_t ev = {.id = CHAT_SESSION_STOP, .data = NULL};
                         xQueueSend(app_events_queue, &ev, 0);
                     }
                 }
@@ -212,6 +247,7 @@ static void webrtc_status_monitor(void *pv) {
                 processing_popup_show(s_app_ctx.main_cont->processing_popup, 0);
                 status_bar_event_t sb_ev = {.type = SB_WEBRTC, .value = 1};
                 status_bar_update_state(s_app_ctx.main_cont->status_bar, sb_ev);
+                terminal_input_clear(s_app_ctx.main_cont->terminal);
                 terminal_output_clear(s_app_ctx.main_cont->terminal);
                 switch_screen(s_app_ctx.main_cont, TERMINAL_SCREEN);
                 xEventGroupSetBits(app_status_bits,
@@ -221,11 +257,13 @@ static void webrtc_status_monitor(void *pv) {
             } break;
             case ESP_WEBRTC_EVENT_DISCONNECTED: {
                 if (prev_state == 0) {
-                    processing_popup_show(s_app_ctx.main_cont->processing_popup, 0);
+                    processing_popup_show(s_app_ctx.main_cont->processing_popup,
+                                          0);
                     msg_box_create("Faild to connect to OpenAI");
                 } else {
                     status_bar_event_t ev = {.type = SB_WEBRTC, .value = 0};
-                    status_bar_update_state(s_app_ctx.main_cont->status_bar, ev);
+                    status_bar_update_state(s_app_ctx.main_cont->status_bar,
+                                            ev);
                     switch_screen(s_app_ctx.main_cont, CONFIG_SCREEN);
                     xEventGroupClearBits(app_status_bits,
                                          STATUS_WEBRTC_CONNECTED_MSK);
@@ -245,29 +283,44 @@ static void webrtc_status_monitor(void *pv) {
 }
 
 static void openai_events_monitor(void *pv) {
+    const char *timeout_msg = "API request timed out\n";
     for (;;) {
         openai_event_t ev;
         if (xQueueReceive(s_app_ctx.openai_ctx->openai_event_queue, &ev,
                           portMAX_DELAY)) {
             ESP_LOGD(__FUNCTION__, "recv ev=%d", ev.type);
             switch (ev.type) {
-            case OPENAI_EVENT_TRANSCRIPTION_DONE: {
-            } break;
-            case OPENAI_EVENT_REQUEST_SENT: {
-                LVGL_MUTEX_LOCKED_CALL(terminal_update_icon(
-                    s_app_ctx.main_cont->terminal, TERM_ICON_PROCESSING));
-            } break;
-            case OPENAI_EVENT_REQUEST_TIMEOUT: {
-                const char *timeout_msg = "API request timed out\n";
+            case OPENAI_EVENT_AUDIO_COMMITTED: {
                 lvgl_port_lock(-1);
-                terminal_output_add(s_app_ctx.main_cont->terminal, timeout_msg,
-                                    strlen(timeout_msg));
-                terminal_update_icon(s_app_ctx.main_cont->terminal, TERM_ICON_READY);
+                terminal_input_clear(s_app_ctx.main_cont->terminal);
+                terminal_output_clear(s_app_ctx.main_cont->terminal);
+                processing_popup_show(s_app_ctx.main_cont->processing_popup, 1);
                 lvgl_port_unlock();
             } break;
+            case OPENAI_EVENT_TRANSCRIPTION_DONE: {
+                xTimerStop(transcription_response_timer, 0);
+            } break;
+            case OPENAI_EVENT_REQUEST_SENT: {
+                xEventGroupSetBits(app_status_bits, STATUS_OPENAI_BUSY_MSK);
+                lvgl_port_lock(-1);
+                processing_popup_show(s_app_ctx.main_cont->processing_popup, 1);
+                lvgl_port_unlock();
+            } break;
+            case OPENAI_EVENT_REQUEST_TIMEOUT: {
+                lvgl_port_lock(-1);
+                terminal_input_clear(s_app_ctx.main_cont->terminal);
+                terminal_output_clear(s_app_ctx.main_cont->terminal);
+                terminal_output_add(s_app_ctx.main_cont->terminal, timeout_msg,
+                                    strlen(timeout_msg));
+                processing_popup_show(s_app_ctx.main_cont->processing_popup, 0);
+                lvgl_port_unlock();
+                xEventGroupClearBits(app_status_bits, STATUS_OPENAI_BUSY_MSK);
+            } break;
             case OPENAI_EVENT_RESPONSE_DONE: {
-                LVGL_MUTEX_LOCKED_CALL(
-                    terminal_update_icon(s_app_ctx.main_cont->terminal, TERM_ICON_READY));
+                lvgl_port_lock(-1);
+                processing_popup_show(s_app_ctx.main_cont->processing_popup, 0);
+                lvgl_port_unlock();
+                xEventGroupClearBits(app_status_bits, STATUS_OPENAI_BUSY_MSK);
             } break;
             case OPENAI_EVENT_NONE:
             default:
@@ -279,11 +332,11 @@ static void openai_events_monitor(void *pv) {
 }
 
 static void openai_transcripts_monitor(void *pv) {
-    char *buffer = (char *)heap_caps_malloc(64 + 1, MALLOC_CAP_SPIRAM);
+    char *buffer = (char *)heap_caps_malloc(256 + 1, MALLOC_CAP_SPIRAM);
     for (;;) {
         size_t bytes =
             xMessageBufferReceive(s_app_ctx.openai_ctx->transcripts_buffer,
-                                  buffer, 64, portMAX_DELAY);
+                                  buffer, 256, portMAX_DELAY);
         if (bytes) {
             const char *newline_pos = strchr(buffer, '\n');
             if (newline_pos) {
@@ -292,8 +345,8 @@ static void openai_transcripts_monitor(void *pv) {
             }
             buffer[bytes] = '\0';
             bytes++;
-            LVGL_MUTEX_LOCKED_CALL(
-                terminal_transcript_add(s_app_ctx.main_cont->terminal, buffer, bytes));
+            LVGL_MUTEX_LOCKED_CALL(terminal_transcript_add(
+                s_app_ctx.main_cont->terminal, buffer, bytes));
         }
     }
     heap_caps_free(buffer);
@@ -303,9 +356,8 @@ static void openai_transcripts_monitor(void *pv) {
 static void openai_messages_monitor(void *pv) {
     char *buffer = (char *)heap_caps_malloc(512, MALLOC_CAP_SPIRAM);
     for (;;) {
-        size_t bytes =
-            xMessageBufferReceive(s_app_ctx.openai_ctx->messages_buffer,
-                                  buffer, 512, portMAX_DELAY);
+        size_t bytes = xMessageBufferReceive(
+            s_app_ctx.openai_ctx->messages_buffer, buffer, 512, portMAX_DELAY);
         LVGL_MUTEX_LOCKED_CALL(
             terminal_output_add(s_app_ctx.main_cont->terminal, buffer, bytes));
     }
@@ -324,7 +376,7 @@ static void thread_scheduler(const char *thread_name,
                              media_lib_thread_cfg_t *thread_cfg) {
     if (strcmp(thread_name, "pc_task") == 0) {
         thread_cfg->stack_size = 8 * 1024;
-        thread_cfg->priority = 2;
+        thread_cfg->priority = 3;
     } else if (strcmp(thread_name, "pc_send") == 0) {
         thread_cfg->stack_size = 4 * 1024;
         thread_cfg->priority = 3;
@@ -387,6 +439,12 @@ int app_init() {
         return -1;
     }
 
+    transcription_response_timer =
+        xTimerCreate("transcription_response_timer",
+                     pdMS_TO_TICKS(TRANSCRIPTION_TIMER_TIMEOUT), pdFALSE,
+                     s_app_ctx.openai_ctx, vTimerCallback);
+    xTimerStop(transcription_response_timer, 0);
+
     media_lib_thread_create(NULL, "wifi_status_monitor", wifi_status_monitor,
                             NULL, 3 * 1024, 1, threadNO_AFFINITY);
     media_lib_thread_create(NULL, "webrtc_status_monitor",
@@ -430,7 +488,7 @@ int app_init() {
     if (nvs_load_str(APP_SETTINGS_PART_NAME, API_KEY_KEY, &api_key)) {
         LVGL_MUTEX_LOCKED_CALL(
             set_api_key(s_app_ctx.main_cont->config_screen->auth_win, api_key));
-        strcpy(s_app_ctx.openai_ctx->api_key, api_key);
+        strcpy(s_app_ctx.openai_ctx->session.api_key, api_key);
         free(api_key);
     } else {
         ESP_LOGI(TAG, "No saved api key");

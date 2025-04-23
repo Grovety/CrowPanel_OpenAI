@@ -20,13 +20,9 @@ typedef struct {
     lv_obj_t *icon;
     button_t clr;
     button_t disconnect;
+    button_t mic;
     void *_private;
 } terminal_t;
-
-typedef enum {
-    TERM_ICON_READY = 0,
-    TERM_ICON_PROCESSING = 1,
-} terminal_icon_state_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,13 +32,12 @@ extern "C" {
  * @brief  Create terminal object
  *
  * @param[in]  cont                 Pointer to parent container
- * @param[in]  disconnect_event_cb  Callback for `Disconnected` button
  *
  * @return
  *       - NULL    Failed to create
  *       - Others  terminal instance
  */
-terminal_t *terminal_create(lv_obj_t *cont, lv_event_cb_t disconnect_event_cb);
+terminal_t *terminal_create(lv_obj_t *cont);
 /**
  * @brief Add data to the terminal output area
  *
@@ -66,12 +61,11 @@ void terminal_transcript_add(terminal_t *term, const char *buffer, size_t len);
  */
 void terminal_output_clear(terminal_t *term);
 /**
- * @brief Update terminal status icon
+ * @brief Clear terminal input area
  *
  * @param[in] term  Pointer to terminal object
- * @param[in] state  New state
  */
-void terminal_update_icon(terminal_t *term, terminal_icon_state_t state);
+void terminal_input_clear(terminal_t *term);
 
 #ifdef __cplusplus
 }

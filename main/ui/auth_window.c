@@ -19,7 +19,7 @@ static void connect_btn_event_cb(lv_event_t *e) {
         } else {
             ESP_LOGW(TAG, "no API key provided");
         }
-        AppEvent_t ev = {.id = WEBRTC_START, .data = buffer};
+        AppEvent_t ev = {.id = CHAT_SESSION_START, .data = buffer};
         xQueueSend(app_events_queue, &ev, 0);
     }
 }
@@ -45,7 +45,7 @@ auth_window_t *auth_window_create(lv_obj_t *cont, lv_obj_t *keyboard) {
     lv_obj_set_style_pad_all(win->api_key.cont, 10, LV_STATE_DEFAULT);
     win->api_key.label = lv_label_create(win->api_key.cont);
     lv_label_set_text(win->api_key.label, "API key");
-    lv_obj_add_style(win->api_key.label, &m_font_style, 0);
+    lv_obj_set_style_text_font(win->api_key.label, &M_FONT, 0);
     win->api_key.field = lv_textarea_create(win->api_key.cont);
     lv_textarea_set_text(win->api_key.field, "");
     lv_obj_clear_flag(win->api_key.field, LV_OBJ_FLAG_SCROLLABLE);
@@ -53,7 +53,7 @@ auth_window_t *auth_window_create(lv_obj_t *cont, lv_obj_t *keyboard) {
     lv_obj_set_size(win->api_key.field, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_add_event_cb(win->api_key.field, text_area_event_cb, LV_EVENT_ALL,
                         keyboard);
-    lv_obj_add_style(win->api_key.field, &s_font_style, 0);
+    lv_obj_set_style_text_font(win->api_key.field, &S_FONT, 0);
 
     lv_obj_t *buttons_area = lv_obj_create(cont);
     lv_obj_set_style_pad_all(buttons_area, 10, LV_STATE_DEFAULT);
